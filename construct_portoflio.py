@@ -41,6 +41,21 @@ def cons_sum_weight(x):
 def cons_long_only_weight(x):
 	return x
 
+
+# calculate risk budgeting portfolio weight give risk budget
+def rb_p_weights(asset_rets, rb):
+	# number of ARP series
+	num_arp = asset_rets.shape[1]
+	# covariance matrix of asset returns
+	p_cov = asset_rets.cov()
+	# initial weights
+	w0 = 1.0 * np.ones((num_arp, 1)) / num_arp
+	# constraints
+	cons = ({'type': 'eq', 'fun': cons_sum_weight}, {'type': 'ineq', 'fun': cons_long_only_weight})
+	# portfolio optimisation
+	return minimize(obj_fun, w0, args=(p_cov, rb), method='SLSQP', constraints=cons)
+
+
 if __name__ == "__main__":
 	# 1. Load ARP data
 	rf_data = pd.read_excel("data/data_rp.xlsx", "RF")  # load daily risk free rate data
@@ -55,8 +70,6 @@ if __name__ == "__main__":
 	arp_rets = arp_rets.sub(rf_data.squeeze()/252, axis='index')
 
 	# 3. Construct risk budgeting portfolio
-	# number of ARP series
-	num_arp = arp_rets.shape[1]
 	# portfolio dates
 	p_dates = arp_rets.index[arp_rets.index >= '2005-01-03']
 	# previous month
@@ -68,14 +81,6 @@ if __name__ == "__main__":
 	p_rets = pd.DataFrame(index=p_dates, columns=['Risk Parity'])
 
 	for t in p_dates:
-		# covariance matrix of ARP returns
-		p_cov = arp_rets[arp_rets.index < t].cov()
-		# strategic risk budget
-		rb = 1.0/num_arp
-		# initial weights
-		w0 = 1.0*np.ones((num_arp, 1))/num_arp
-		# constraints
-		cons = ({'type': 'eq', 'fun': cons_sum_weight}, {'type': 'ineq', 'fun': cons_long_only_weight})
 
 		# construct risk budgeting portfolio and re-balance on monthly basis
 		if t.month==pre_mth:
@@ -85,8 +90,7 @@ if __name__ == "__main__":
 			# update the value of the previous month record
 			pre_mth = t.month
 			# re-balance the portfolio at the start of the month
-			min_results = minimize(obj_fun, w0, args=(p_cov, rb), method='SLSQP', constraints=cons)
-			w.ix[t] = min_results.x
+			w.ix[t] = rb_p_weights(arp_rets[arp_rets.index < t], 1.0/num_arp).x
 
 		# calculate risk budgeting portfolio returns
 		p_rets.ix[t] = np.sum(w.ix[t] * arp_rets.ix[t])
